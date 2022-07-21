@@ -182,6 +182,14 @@ class SolutionManager:
             verbose=self.progress,
         )
 
+        ### sflearn addition ###
+    
+        for tube in self.tubes:
+            self.structural_solver.calculate_stress_vm(tube)
+            self.structural_solver.calculate_strain_eq(tube, self.deformation_material)
+
+        ### sflearn addition ###
+
 
 class Heuristic:
     """Solution heuristic superclass

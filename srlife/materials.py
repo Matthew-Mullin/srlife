@@ -34,6 +34,26 @@ class DeformationMaterial:
         """
         return parse.parse_xml(self.xmlfile, self.modelname)
 
+### sflearn addition ###
+
+    def get_nu(self, temp):
+        model = find_name(self.xmlfile, self.modelname)
+        #need to basically make a function that can get the poisson's ratio and if it's an arrray, then let it interpolate and return an array of poisson's ratios
+        data = load_node(model[0])[self.modelname]
+        for i in data:
+            if i == 'elastic':
+                for j in data[i]:
+                    if j == 'm2':
+                        if isinstance(data[i][j], dict):
+                            x = destring_array(data[i][j]['points'])
+                            y = destring_array(data[i][j]['values'])
+                            getPoisson = inter.interp1d(x, y)
+                            return getPoisson(temp)
+                        elif isinstance(data[i][j], str):
+                            return destring_array(data[i][j])[0] 
+        return 0.5
+
+### sflearn addition ###
 
 class ThermalMaterial:
     """

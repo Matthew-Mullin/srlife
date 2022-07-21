@@ -254,6 +254,14 @@ class PythonTubeSolver(TubeSolver):
         tube.add_blank_quadrature_results(
             "temperature", (tube.ntime,) + self.qshape(tube)
         )
+        ### sflearn addition ###
+        tube.add_blank_quadrature_results(
+            "strain_eq", (tube.ntime,) + self.qshape(tube)
+            )             
+        tube.add_blank_quadrature_results(
+            "stress_vm", (tube.ntime,) + self.qshape(tube)
+            )   
+        ### sflearn addition ###
 
         suffixes = ["_x", "_y", "_z"]
         for i in range(tube.ndim):
@@ -488,6 +496,39 @@ class PythonTubeSolver(TubeSolver):
         Results field to the quadrature points
         """
         return state.sbasis.interpolate(f).value
+
+    ### sflearn addition ####
+
+    def calculate_stress_vm(self, tube):
+        vm = np.sqrt((
+            (tube.quadrature_results['stress_xx'] - tube.quadrature_results['stress_yy'])**2.0 + 
+            (tube.quadrature_results['stress_yy'] - tube.quadrature_results['stress_zz'])**2.0 + 
+            (tube.quadrature_results['stress_zz'] - tube.quadrature_results['stress_xx'])**2.0 + 
+            6.0 * (tube.quadrature_results['stress_xy']**2.0 + 
+                tube.quadrature_results['stress_yz']**2.0 + 
+                tube.quadrature_results['stress_xz']**2.0))/2.0)
+        tube.quadrature_results['stress_vm'] = vm
+
+    def calculate_strain_eq(self, tube, material, nu=0.5):
+        strain_names = ['mechanical_strain_xx', 'mechanical_strain_yy', 'mechanical_strain_zz',
+            'mechanical_strain_yz', 'mechanical_strain_xz', 'mechanical_strain_xy']
+        strain_factors = [1.0,1.0,1.0,2.0, 2.0, 2.0]
+
+        strains = np.array([ef*tube.quadrature_results[en][
+        :] for 
+        en,ef in zip(strain_names, strain_factors)])
+
+        #calculate poisson's ratio based on quadrature temp
+        nu = material.get_nu(tube.quadrature_results['temperature'])
+
+        eq = np.sqrt(2) / (2*(1+nu)) * np.sqrt(
+            (strains[0,:] - strains[1,:])**2 + (strains[1,:]-strains[2,:])**2 + (strains[2,:]-strains[0,:])**2.0
+            + 3.0/2.0 * (strains[3,:]**2.0 + strains[4,:]**2.0 + strains[5,:]**2.0)
+            )
+
+        tube.quadrature_results['strain_eq'] = eq
+    
+    ### sflearn addition ####    
 
     class State:
         """
