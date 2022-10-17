@@ -509,7 +509,7 @@ class PythonTubeSolver(TubeSolver):
                 tube.quadrature_results['stress_xz']**2.0))/2.0)
         tube.quadrature_results['stress_vm'] = vm
 
-    def calculate_strain_eq(self, tube, material, nu=0.5):
+    def calculate_strain_eq(self, tube, material, nu=0.5): #I think this function may be overly conservative or strains = strains - np.min(strains,axis=i) where i = time
         strain_names = ['mechanical_strain_xx', 'mechanical_strain_yy', 'mechanical_strain_zz',
             'mechanical_strain_yz', 'mechanical_strain_xz', 'mechanical_strain_xy']
         strain_factors = [1.0,1.0,1.0,2.0, 2.0, 2.0]

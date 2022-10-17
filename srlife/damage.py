@@ -680,19 +680,24 @@ class TimeFractionInteractionDamage(DamageCalculator):
         """
         # Material point cycle creep damage
         Dc = self.creep_damage(tube, material, receiver)
+        tube.add_quadrature_results_damage('creep', Dc) #sflearn addition
 
         # Material point cycle fatigue damage
         Df = self.fatigue_damage(tube, material, receiver)
+        tube.add_quadrature_results_damage('fatigue', Df) #sflearn addition
 
         nc = receiver.days
 
+        ### sflearn modifications ###
+
         # This is going to be expensive, but I don't see much way around it
-        return min(
-            self.calculate_max_cycles(
-                self.make_extrapolate(c), self.make_extrapolate(f), material
-            )
-            for c, f in zip(Dc.reshape(nc, -1).T, Df.reshape(nc, -1).T)
-        )
+        tube.add_quadrature_results_damage('max_cycles', (self.calculate_max_cycles(self.make_extrapolate(c), 
+        self.make_extrapolate(f), material) for c,f in 
+            zip(Dc.reshape(nc,-1).T, Df.reshape(nc,-1).T)))
+        
+        return min(tube.quadrature_results['max_cycles'])
+  
+        ### sflearn modifications ###  
 
     def calculate_max_cycles(self, Dc, Df, material, rep_min=1, rep_max=1e6):
         """
@@ -725,36 +730,10 @@ class TimeFractionInteractionDamage(DamageCalculator):
           receiver    receiver, for metadata
         """
         # For now just use the von Mises effective stress
-        vm = np.sqrt(
-            (
-                (
-                    tube.quadrature_results["stress_xx"]
-                    - tube.quadrature_results["stress_yy"]
-                )
-                ** 2.0
-                + (
-                    tube.quadrature_results["stress_yy"]
-                    - tube.quadrature_results["stress_zz"]
-                )
-                ** 2.0
-                + (
-                    tube.quadrature_results["stress_zz"]
-                    - tube.quadrature_results["stress_xx"]
-                )
-                ** 2.0
-                + 6.0
-                * (
-                    tube.quadrature_results["stress_xy"] ** 2.0
-                    + tube.quadrature_results["stress_yz"] ** 2.0
-                    + tube.quadrature_results["stress_xz"] ** 2.0
-                )
-            )
-            / 2.0
-        )
 
         tR = material.time_to_rupture(
-            "averageRupture", tube.quadrature_results["temperature"], vm
-        )
+            "averageRupture", tube.quadrature_results["temperature"], tube.quadrature_results['stress_vm']
+        ) #sflearn addition
         dts = np.diff(tube.times)
         time_dmg = dts[:, np.newaxis, np.newaxis] / tR[1:]
 
@@ -869,3 +848,110 @@ class TimeFractionInteractionDamage(DamageCalculator):
             )
 
         return dmg
+
+
+### sflearn addition ###
+
+class RainFlowCountingDamage(TimeFractionInteractionDamage):
+
+  def fatigue_damage(self, tube, material, receiver):
+    """
+      Calculate fatigue damage at each material point
+
+      Parameters:
+        tube        single tube with full results
+        material    damage material model
+        receiver    receiver, for metadata
+    """
+    # Identify cycle boundaries
+    inds = self.id_cycles(tube, receiver)
+
+    # # Run through each cycle and ID max strain range and fatigue damage
+    
+    cycle_dmg =  np.array([self.cycle_fatigue(tube, material, inds, i)
+      for i in range(receiver.days)])
+
+    return cycle_dmg
+
+  def id_cycles(self, tube, receiver):
+    """
+      Helper to separate out individual cycles by index
+
+      Parameters:
+        tube        single tube with results
+        receiver    receiver, for metadata
+    """
+    tm = np.mod(tube.times, receiver.period)
+    inds = list(np.where(tm == 0)[0])
+    if len(inds) != (receiver.days + 1):
+      raise ValueError("Tube times not compatible with the receiver"
+          " number of days and cycle period!")
+      
+    fields = ['rf_ranges', 'rf_counts', 'rf_means', 'rf_starts', 'rf_ends']
+
+    for field in fields:
+        tube.add_blank_quadrature_results_damage(field, (tm,) + tube.strain_eq[0,:].shape)
+
+    return inds
+  
+  def cycle_fatigue(self, tube, material, inds, index, nu = 0.5):
+    """
+      Calculate fatigue damage for a single cycle
+
+      Parameters:
+        strains         single cycle strains
+        temperatures    single cycle temperatures
+        material        damage model
+
+      Additional parameters:
+        nu              effective Poisson's ratio to use
+    """
+    
+    dmg = np.zeros(tube.quadrature_results['strain_eq'][0,:].shape)
+
+    rangesnp = np.empty(dmg.shape, dtype=list)
+    meansnp = np.empty(dmg.shape, dtype=list)
+    countsnp = np.empty(dmg.shape, dtype=list)
+    i_startsnp = np.empty(dmg.shape, dtype=list)
+    i_endsnp = np.empty(dmg.shape, dtype=list)
+    
+    for i in range(dmg.shape[0]):
+        for j in range(dmg.shape[0]):
+            ranges = []
+            means = []
+            counts = []
+            i_starts = []
+            i_ends = []
+            
+            for rng, mean, count, i_start, i_end in rainflow.extract_cycles(tube.quadrature_results['strain_eq'][inds[index]:inds[index+1],i,j]): 
+                ranges.append(rng)
+                means.append(mean)
+                counts.append(count)
+                i_starts.append(i_start)
+                i_ends.append(i_end)
+            
+            rangesnp[i,j] = ranges
+            meansnp[i,j] = means
+            countsnp[i,j] = counts
+            i_startsnp[i,j] = i_starts
+            i_endsnp[i,j] = i_ends
+    
+    arrays = [rangesnp, meansnp, countsnp, i_startsnp, i_endsnp]        
+    fields = ['rf_ranges', 'rf_counts', 'rf_means', 'rf_starts', 'rf_ends']
+    
+    counter = 0
+    for field in fields:
+        tube.quadrature_results[field][index,:] = arrays[counter]
+        counter+=1
+
+    for i in range(dmg.shape[0]):
+        for j in range(dmg.shape[1]):
+            for k in range(len(rangesnp[i,j])):
+                temp = np.max(tube.quadrature_results['temperature'][i_startsnp[i,j][k]:i_endsnp[i,j][k],i,j])
+                dmg[i,j] += countsnp[i,j][k] / material.cycles_to_fail('nominalFatigue', temp, rangesnp[i,j][k])
+
+    return dmg
+
+#class SimpleCycleCountingDamage(RainFlowCountingDamage):
+
+### sflearn addition ###

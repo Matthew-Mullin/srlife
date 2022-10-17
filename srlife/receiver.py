@@ -647,6 +647,31 @@ class Tube:
             raise ValueError("Quadrature data must have time axis first!")
         self.quadrature_results[name] = self._setup_memmap(name + "_quad", shape)
 
+###sflearn addition###
+
+    def add_quadrature_results_damage(self, name, data):
+      """ Add a result at the quadrature points
+
+        Args:
+          name (str): parameter set name
+          data (np.array): actual results data
+      """
+      
+      self.quadrature_results[name] = self._setup_memmap(name + "_quad", data.shape)
+      self.quadrature_results[name][:] = data[:]
+
+    def add_blank_quadrature_results_damage(self, name, shape):
+      """ Add a blank quadrature point result field
+
+        Args:
+          name (str): parameter set name
+          shape (tuple): required shape
+      """
+    
+    self.quadrature_results[name] = self._setup_memmap(name + "_quad", shape)
+
+###sflearn addition###
+
     def _setup_memmap(self, name, shape):
         """Map array to disk if required
 
